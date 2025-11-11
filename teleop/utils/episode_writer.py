@@ -228,3 +228,21 @@ class EpisodeWriter():
             time.sleep(0.01)
         self.stop_worker = True
         self.worker_thread.join()
+
+    def init_camera_dirs(self, base_dir: str, cam_names: list[str]):
+        self.cams_root = os.path.join(base_dir, "cams")
+        os.makedirs(self.cams_root, exist_ok=True)
+        self._cam_dirs = {}
+        for name in cam_names:
+            d = os.path.join(self.cams_root, name)
+            os.makedirs(d, exist_ok=True)
+            self._cam_dirs[name] = d
+
+    def write_camera_rgb(self, name: str, rgb, step_idx: int, ts: float):
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        fn = f"{step_idx:06d}_{int(ts*1000)}.png"
+        cv2.imwrite(os.path.join(self._cam_dirs[name], fn), bgr)
+
+    def write_camera_depth_u16(self, name: str, depth_u16, step_idx: int, ts: float):
+        fn = f"{step_idx:06d}_{int(ts*1000)}.png"
+        cv2.imwrite(os.path.join(self._cam_dirs[name], fn), depth_u16)

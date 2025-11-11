@@ -5,6 +5,11 @@ import cv2
 from multiprocessing import shared_memory, Value, Array, Lock
 import threading
 import logging_mp
+# ===== BEGIN MULTI-CAM IMPORTS =====
+from teleop.sensors.multi_camera_rs import MultiCameraRS, RSSpec, list_serials
+import rerun as rr
+import cv2, numpy as np
+# ===== END MULTI-CAM IMPORTS =====
 
 from teleop.carpet_tactile.sensors.sensors import MultiSensors
 
@@ -185,6 +190,50 @@ if __name__ == '__main__':
     if args.record and not args.headless:
         recorder = EpisodeWriter(task_dir = args.task_dir, frequency = args.frequency, rerun_log = True)
         
+    # ===== BEGIN MULTI-CAM SETUP (non-intrusive) =====
+    ENABLE_EXTRA_CAMS = True   # 필요시 False로 끄기
+    DEPTH_VIZ_MIN_M   = 0.25
+    DEPTH_VIZ_MAX_M   = 2.00
+    DEPTH_SCALE       = 0.001  # RealSense 기본값 (장비별로 다르면 조정)
+
+    def _rr_log_rgb(path, rgb):
+        if hasattr(rr, "Image"):
+            rr.log(path, rr.Image(rgb))
+        else:
+            rr.log_image(path, rgb)
+
+    def _depth_to_viz_rgb(depth_u16):
+        dm = depth_u16.astype(np.float32) * DEPTH_SCALE
+        dm = np.clip(dm, DEPTH_VIZ_MIN_M, DEPTH_VIZ_MAX_M)
+        norm = ((dm - DEPTH_VIZ_MIN_M)/(DEPTH_VIZ_MAX_M-DEPTH_VIZ_MIN_M)*255.0).astype(np.uint8)
+        colored = cv2.applyColorMap(norm, cv2.COLORMAP_TURBO)
+        return cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
+
+    cams = None
+    if ENABLE_EXTRA_CAMS:
+        serials = list_serials()
+        if len(serials) >= 3:
+            serials = serials[:3]
+        elif len(serials) == 2:
+            serials = [serials[0], serials[1], "SYNTH2"]
+        elif len(serials) == 1:
+            serials = [serials[0], "SYNTH1", "SYNTH2"]
+        else:
+            serials = ["SYNTH0", "SYNTH1", "SYNTH2"]
+
+        cam_specs = [
+            RSSpec("wrist_left",  serials[0], 640, 480, 30, need_depth=False),
+            RSSpec("wrist_right", serials[1], 640, 480, 30, need_depth=False),
+            RSSpec("front",       serials[2], 640, 480, 30, need_depth=True),
+        ]
+        cams = MultiCameraRS(cam_specs)
+
+        try:
+            recorder.init_camera_dirs(recorder.task_dir, ["front_rgb","front_depth","wrist_left","wrist_right"])
+        except Exception:
+            pass
+    # ===== END MULTI-CAM SETUP =====
+
     try:
         logger_mp.info("Please enter the start signal (enter 'r' to start the subsequent program)")
         # while not start_signal:
@@ -192,6 +241,33 @@ if __name__ == '__main__':
         # arm_ctrl.speed_gradual_max()
         while running:
             start_time = time.time()
+            # ===== BEGIN MULTI-CAM LOOP =====
+            if cams is not None:
+                if cams.ready("wrist_left"):
+                    rgb = cams.get_rgb("wrist_left")
+                    _rr_log_rgb("/cams/wrist_left", rgb)
+                    try: recorder.write_camera_rgb("wrist_left", rgb, 0, time.time())
+                    except Exception: pass
+
+                if cams.ready("wrist_right"):
+                    rgb = cams.get_rgb("wrist_right")
+                    _rr_log_rgb("/cams/wrist_right", rgb)
+                    try: recorder.write_camera_rgb("wrist_right", rgb, 0, time.time())
+                    except Exception: pass
+
+                if cams.ready("front"):
+                    rgb = cams.get_rgb("front")
+                    d16 = cams.get_depth("front")
+                    _rr_log_rgb("/cams/front_rgb", rgb)
+                    if d16 is not None:
+                        viz = _depth_to_viz_rgb(d16)
+                        _rr_log_rgb("/cams/front_depth", viz)
+                        try:
+                            recorder.write_camera_rgb("front_rgb", rgb, 0, time.time())
+                            recorder.write_camera_depth_u16("front_depth", d16, 0, time.time())
+                        except Exception:
+                            pass
+            # ===== END MULTI-CAM LOOP =====
 
             if not args.headless:
                 tv_resized_image = cv2.resize(tv_img_array, (tv_img_shape[1] // 2, tv_img_shape[0] // 2))
@@ -372,6 +448,13 @@ if __name__ == '__main__':
         logger_mp.error(f"An error occurred: {e}")
         logger_mp.info("Exiting program due to an error...")
     finally:
+        # ===== BEGIN MULTI-CAM CLEANUP =====
+        try:
+            if cams is not None:
+                cams.close()
+        except Exception:
+            pass
+        # ===== END MULTI-CAM CLEANUP =====
         # arm_ctrl.ctrl_dual_arm_go_home()
         if args.sim:
             sim_state_subscriber.stop_subscribe()
