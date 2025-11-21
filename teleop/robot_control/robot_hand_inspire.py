@@ -3,10 +3,18 @@ from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, Cha
 # from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorCmds_, MotorStates_ # OLD IDL, REMOVED
 # from unitree_sdk2py.idl.default import unitree_go_msg_dds__MotorCmd_ # OLD IDL, REMOVED
 
-# NEW IMPORTS for Inspire Hand SDK
-from inspire_sdkpy import inspire_dds, inspire_hand_defaut
+import warnings
 
-from teleop.robot_control.hand_retargeting import HandRetargeting, HandType # Assuming this remains the same
+# NEW IMPORTS for Inspire Hand SDK
+try:
+    from inspire_sdkpy import inspire_dds, inspire_hand_defaut
+except ImportError as e:
+    warnings.warn("Error importing inspire_sdkpy. Ensure the Inspire SDK is installed and accessible.")
+
+try:
+    from teleop.robot_control.hand_retargeting import HandRetargeting, HandType # Assuming this remains the same
+except ImportError as e:
+    warnings.warn("Error importing HandRetargeting. Ensure teleop.robot_control.hand_retargeting is accessible.")
 import numpy as np
 # from enum import IntEnum # Old Enums for joint indexing might not be needed for new DDS messages
 import threading
@@ -76,6 +84,7 @@ class Inspire_Controller:
         else:
             # Assuming a different config for unit tests if necessary
             self.hand_retargeting = HandRetargeting(HandType.INSPIRE_HAND_Unit_Test)
+
         # Initialize hand command publishers
         self.LeftHandCmd_publisher = ChannelPublisher(kTopicInspireCtrlLeft, inspire_dds.inspire_hand_ctrl)
         self.LeftHandCmd_publisher.Init()
