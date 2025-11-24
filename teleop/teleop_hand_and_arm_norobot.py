@@ -17,9 +17,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from televuer import TeleVuerWrapper # NOQA E402
-# from teleop.robot_control.robot_arm import G1_29_ArmController
-# from teleop.robot_control.robot_arm_ik import G1_29_ArmIK
+from televuer import TeleVuerWrapper
+from teleop.robot_control.robot_arm import G1_29_ArmController, G1_23_ArmController, H1_2_ArmController, H1_ArmController
+# from teleop.robot_control.robot_arm_ik import G1_29_ArmIK, G1_23_ArmIK, H1_2_ArmIK, H1_ArmIK
+# from teleop.robot_control.robot_hand_unitree import Dex3_1_Controller, Dex1_1_Gripper_Controller
 # from teleop.robot_control.robot_hand_inspire import Inspire_Controller
 # from teleop.robot_control.robot_hand_brainco import Brainco_Controller
 from teleop.image_server.image_client import ImageClient
@@ -27,15 +28,15 @@ from teleop.utils.episode_writer import EpisodeWriter
 from sshkeyboard import listen_keyboard, stop_listening
 
 # for simulation
-from unitree_sdk2py.core.channel import ChannelPublisher # NOQA E402
-from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_ # NOQA E402
+from unitree_sdk2py.core.channel import ChannelPublisher
+from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
 def publish_reset_category(category: int,publisher): # Scene Reset signal
     msg = String_(data=str(category))
     publisher.Write(msg)
     logger_mp.info(f"published reset category: {category}")
 
 # state transition
-start_signal = True
+start_signal = False
 running = True
 should_toggle_recording = False
 is_recording = False
@@ -83,15 +84,26 @@ if __name__ == '__main__':
     logger_mp.info(f"args: {args}")
 
     # image client: img_config should be the same as the configuration in image_server.py (of Robot's development computing unit)
-    img_config = {
-        'fps': 30,
-        'head_camera_type': 'opencv',
-        'head_camera_image_shape': [480, 1280],  # Head camera resolution
-        'head_camera_id_numbers': [0],
-        'wrist_camera_type': 'opencv',
-        'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
-        'wrist_camera_id_numbers': [2, 4],
-    }
+    if args.sim:
+        img_config = {
+            'fps': 30,
+            'head_camera_type': 'opencv',
+            'head_camera_image_shape': [480, 640],  # Head camera resolution
+            'head_camera_id_numbers': [0],
+            'wrist_camera_type': 'opencv',
+            'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+            'wrist_camera_id_numbers': [2, 4],
+        }
+    else:
+        img_config = {
+            'fps': 30,
+            'head_camera_type': 'opencv',
+            'head_camera_image_shape': [480, 1280],  # Head camera resolution
+            'head_camera_id_numbers': [0],
+            'wrist_camera_type': 'opencv',
+            'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+            'wrist_camera_id_numbers': [2, 4],
+        }
 
     base_images = list()
     if args.carpet_tactile:
@@ -115,8 +127,10 @@ if __name__ == '__main__':
 
 
     ASPECT_RATIO_THRESHOLD = 2.0 # If the aspect ratio exceeds this value, it is considered binocular
-    BINOCULAR = False
-
+    if len(img_config['head_camera_id_numbers']) > 1 or (img_config['head_camera_image_shape'][1] / img_config['head_camera_image_shape'][0] > ASPECT_RATIO_THRESHOLD):
+        BINOCULAR = True
+    else:
+        BINOCULAR = False
     if 'wrist_camera_type' in img_config:
         WRIST = True
     else:
@@ -155,21 +169,49 @@ if __name__ == '__main__':
 
     # arm
     if args.arm == "G1_29":
-        pass
         # arm_ctrl = G1_29_ArmController(motion_mode=args.motion, simulation_mode=args.sim)
         # arm_ik = G1_29_ArmIK()
+        pass
+    elif args.arm == "G1_23":
+        arm_ctrl = G1_23_ArmController(simulation_mode=args.sim)
+        arm_ik = G1_23_ArmIK()
+    elif args.arm == "H1_2":
+        arm_ctrl = H1_2_ArmController(simulation_mode=args.sim)
+        arm_ik = H1_2_ArmIK()
+    elif args.arm == "H1":
+        arm_ctrl = H1_ArmController(simulation_mode=args.sim)
+        arm_ik = H1_ArmIK()
 
     # end-effector
-
-    if args.ee == "inspire1":
+    if args.ee == "dex3":
+        left_hand_pos_array = Array('d', 75, lock = True)      # [input]
+        right_hand_pos_array = Array('d', 75, lock = True)     # [input]
+        dual_hand_data_lock = Lock()
+        dual_hand_state_array = Array('d', 14, lock = False)   # [output] current left, right hand state(14) data.
+        dual_hand_action_array = Array('d', 14, lock = False)  # [output] current left, right hand action(14) data.
+        hand_ctrl = Dex3_1_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
+    elif args.ee == "dex1":
+        left_gripper_value = Value('d', 0.0, lock=True)        # [input]
+        right_gripper_value = Value('d', 0.0, lock=True)       # [input]
+        dual_gripper_data_lock = Lock()
+        dual_gripper_state_array = Array('d', 2, lock=False)   # current left, right gripper state(2) data.
+        dual_gripper_action_array = Array('d', 2, lock=False)  # current left, right gripper action(2) data.
+        gripper_ctrl = Dex1_1_Gripper_Controller(left_gripper_value, right_gripper_value, dual_gripper_data_lock, dual_gripper_state_array, dual_gripper_action_array, simulation_mode=args.sim)
+    elif args.ee == "inspire1":
         left_hand_pos_array = Array('d', 75, lock = True)      # [input]
         right_hand_pos_array = Array('d', 75, lock = True)     # [input]
         dual_hand_data_lock = Lock()
         dual_hand_state_array = Array('d', 12, lock = False)   # [output] current left, right hand state(12) data.
         dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
-
         # hand_ctrl = Inspire_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
         hand_ctrl= None
+    elif args.ee == "brainco":
+        left_hand_pos_array = Array('d', 75, lock = True)      # [input]
+        right_hand_pos_array = Array('d', 75, lock = True)     # [input]
+        dual_hand_data_lock = Lock()
+        dual_hand_state_array = Array('d', 12, lock = False)   # [output] current left, right hand state(12) data.
+        dual_hand_action_array = Array('d', 12, lock = False)  # [output] current left, right hand action(12) data.
+        hand_ctrl = Brainco_Controller(left_hand_pos_array, right_hand_pos_array, dual_hand_data_lock, dual_hand_state_array, dual_hand_action_array, simulation_mode=args.sim)
     else:
         pass
 
@@ -181,8 +223,16 @@ if __name__ == '__main__':
         sim_state_subscriber = start_sim_state_subscribe()
 
     # controller + motion mode
-
-    if args.record and not args.headless:
+    if args.xr_mode == "controller" and args.motion:
+        from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
+        sport_client = LocoClient()
+        sport_client.SetTimeout(0.0001)
+        sport_client.Init()
+    
+    # record + headless mode
+    if args.record and args.headless:
+        recorder = EpisodeWriter(task_dir = args.task_dir, frequency = args.frequency, rerun_log = False)
+    elif args.record and not args.headless:
         recorder = EpisodeWriter(task_dir = args.task_dir, frequency = args.frequency, rerun_log = True)
         
     try:
@@ -226,8 +276,32 @@ if __name__ == '__main__':
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
                 with right_hand_pos_array.get_lock():
                     right_hand_pos_array[:] = tele_data.right_hand_pos.flatten()
+            elif args.ee == "dex1" and args.xr_mode == "controller":
+                with left_gripper_value.get_lock():
+                    left_gripper_value.value = tele_data.left_trigger_value
+                with right_gripper_value.get_lock():
+                    right_gripper_value.value = tele_data.right_trigger_value
+            elif args.ee == "dex1" and args.xr_mode == "hand":
+                with left_gripper_value.get_lock():
+                    left_gripper_value.value = tele_data.left_pinch_value
+                with right_gripper_value.get_lock():
+                    right_gripper_value.value = tele_data.right_pinch_value
             else:
                 pass        
+            
+            # high level control
+            if args.xr_mode == "controller" and args.motion:
+                # quit teleoperate
+                if tele_data.tele_state.right_aButton:
+                    running = False
+                    stop_listening()
+                # command robot to enter damping mode. soft emergency stop function
+                if tele_data.tele_state.left_thumbstick_state and tele_data.tele_state.right_thumbstick_state:
+                    sport_client.Damp()
+                # control, limit velocity to within 0.3
+                sport_client.Move(-tele_data.tele_state.left_thumbstick_value[1]  * 0.3,
+                                  -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
+                                  -tele_data.tele_state.right_thumbstick_value[0] * 0.3)
 
             # get current robot state data.
             # current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
@@ -244,8 +318,33 @@ if __name__ == '__main__':
             if args.record:
                 logger_mp.debug("record")
                 # dex hand or gripper
-
-                if (args.ee == "inspire1" or args.ee == "brainco") and args.xr_mode == "hand":
+                if args.ee == "dex3" and args.xr_mode == "hand":
+                    with dual_hand_data_lock:
+                        left_ee_state = dual_hand_state_array[:7]
+                        right_ee_state = dual_hand_state_array[-7:]
+                        left_hand_action = dual_hand_action_array[:7]
+                        right_hand_action = dual_hand_action_array[-7:]
+                        current_body_state = []
+                        current_body_action = []
+                elif args.ee == "dex1" and args.xr_mode == "hand":
+                    with dual_gripper_data_lock:
+                        left_ee_state = [dual_gripper_state_array[0]]
+                        right_ee_state = [dual_gripper_state_array[1]]
+                        left_hand_action = [dual_gripper_action_array[0]]
+                        right_hand_action = [dual_gripper_action_array[1]]
+                        current_body_state = []
+                        current_body_action = []
+                elif args.ee == "dex1" and args.xr_mode == "controller":
+                    with dual_gripper_data_lock:
+                        left_ee_state = [dual_gripper_state_array[0]]
+                        right_ee_state = [dual_gripper_state_array[1]]
+                        left_hand_action = [dual_gripper_action_array[0]]
+                        right_hand_action = [dual_gripper_action_array[1]]
+                        # current_body_state = arm_ctrl.get_current_motor_q().tolist()
+                        current_body_action = [-tele_data.tele_state.left_thumbstick_value[1]  * 0.3,
+                                               -tele_data.tele_state.left_thumbstick_value[0]  * 0.3,
+                                               -tele_data.tele_state.right_thumbstick_value[0] * 0.3]
+                elif (args.ee == "inspire1" or args.ee == "brainco") and args.xr_mode == "hand":
                     with dual_hand_data_lock:
                         left_ee_state = dual_hand_state_array[:6]
                         right_ee_state = dual_hand_state_array[-6:]
@@ -270,8 +369,6 @@ if __name__ == '__main__':
                 # right_arm_state = current_lr_arm_q[-7:]
                 # left_arm_action = sol_q[:7]
                 # right_arm_action = sol_q[-7:]
-
-
                 if is_recording:
                     logger_mp.debug("is_recording")
                     colors = {}
@@ -337,6 +434,7 @@ if __name__ == '__main__':
                             "qpos": current_body_action,
                         }, 
                     }
+
 
                     if args.carpet_tactile:
                         logger_mp.debug("carpet_tactile")
