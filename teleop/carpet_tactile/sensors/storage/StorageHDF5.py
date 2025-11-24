@@ -1,5 +1,5 @@
-import sys; sys.path.insert(0, '')
-import os
+import sys; sys.path.insert(0, '.')
+import sys, os, re, time, shutil, math, random, datetime, argparse, signal
 import numpy as np
 import h5py
 
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     # Test code  
     storage = StorageHDF5('recordings', 'test', AppContext.create(), {})
     for i in range(1500):
-        storage.addFrame(dataset_tools.getUnixTimestamp(), {'scalar': i, 'vec3': np.array([1, 2, 3], np.float32) * i, 'mat2d': np.ones((32, 32), np.uint16) * i})
+        storage.addFrame(dataset_tools.getUnixTimestamp(), {'scalar': i, 'vec3': np.array([1,2,3], np.float32) * i, 'mat2d': np.ones((32,32), np.uint16) * i})
     storage.release()
 
     f = h5py.File('recordings/test.hdf5', 'r')

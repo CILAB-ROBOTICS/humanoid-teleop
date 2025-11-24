@@ -1,8 +1,4 @@
-import copy
 import os
-import traceback
-from idlelib.pyparse import trans
-
 import cv2
 import json
 import datetime
@@ -12,8 +8,6 @@ from .rerun_visualizer import RerunLogger
 from queue import Queue, Empty
 from threading import Thread
 import logging_mp
-import logging
-
 logger_mp = logging_mp.get_logger(__name__)
 
 class EpisodeWriter():
@@ -122,13 +116,10 @@ class EpisodeWriter():
         logger_mp.info(f"==> New episode created: {self.episode_dir}")
         return True  # Return True if the episode is successfully created
         
-    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, audios=None,
-                 sim_state=None,
-                 carpet_tactiles=None):
+    def add_item(self, colors, depths=None, states=None, actions=None, tactiles=None, audios=None, sim_state=None, carpet_tactiles=None):
         # Increment the item ID
         self.item_id += 1
         # Create the item data dictionary
-
         item_data = {
             'idx': self.item_id,
             'colors': colors,
@@ -166,10 +157,9 @@ class EpisodeWriter():
         depths = item_data.get('depths', {})
         audios = item_data.get('audios', {})
         carpet_tactiles = item_data.get('carpet_tactiles', {})
-        carpet_tactiles_val = copy.deepcopy(carpet_tactiles)
 
         # Save images
-        if len(colors):
+        if colors:
             for idx_color, (color_key, color) in enumerate(colors.items()):
                 color_name = f'{str(idx).zfill(6)}_{color_key}.jpg'
                 if not cv2.imwrite(os.path.join(self.color_dir, color_name), color):
@@ -197,20 +187,14 @@ class EpisodeWriter():
                 np.save(os.path.join(self.carpet_tactile_dir, carpet_name), carpet_data.astype(np.float32))
                 item_data['carpet_tactiles'][carpet_key] = os.path.join(self.episode_dir, carpet_name)
 
+
         # Update episode data
         self.episode_data.append(item_data)
-
-        # add tactile image data
-
-        if self.rerun_log and carpet_tactiles_val:
-            item_data['tactile_vis'] = {}
-            for carpet_key, carpet_data in carpet_tactiles_val.items():
-                item_data['tactile_vis'][carpet_key] = carpet_data
 
         # Log data if necessary
         if self.rerun_log:
             curent_record_time = time.time()
-            logger_mp.info(f"==> episode_id:{self.episode_id} item_id:{idx}  current_time:{curent_record_time}")
+            logger_mp.info(f"==> episode_id:{self.episode_id}  item_id:{idx}  current_time:{curent_record_time}")
             self.rerun_logger.log_item_data(item_data)
 
     def save_episode(self):

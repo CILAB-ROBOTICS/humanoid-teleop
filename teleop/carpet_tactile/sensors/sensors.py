@@ -1,35 +1,26 @@
-import time
-
 import serial
 import numpy as np
 import cv2
 import multiprocessing as mp
 from multiprocessing import Manager
 import copy
-from tactile_collecting.sensors.app.FramerateMonitor import FramerateMonitor
+from carpet_tactile.sensors.app.FramerateMonitor import FramerateMonitor
 
 
 class Sensor:
-    def __init__(self, port, baudrate, timeout, stage):
+    def __init__(self, port, baudrate, timeout):
         self.queue = Manager().Queue()
         self.exit = mp.Event()
-        self.stage = stage
-        self.w = list()
-
-        self.queue_resistance = Manager().list()
-        self.process = mp.Process(target=self._read, args=(self.queue, port, baudrate, timeout, self.stage,
-                                                           self.queue_resistance))
-        self.bad_row_indexs = [16] # []  [16, 27]
-        self.bad_col_indexs = [] #  [14, 15, 16] # [9, 19]
+        self.process = mp.Process(target=self._read, args=(self.queue, port, baudrate, timeout))
 
     def start(self):
         self.process.start()
-        # wait for init
-
+        #wait for init
+    
     def close(self):
         self.exit.set()
         self.process.join()
-
+    
     def get(self):
         result = None
         if self.queue.empty():
@@ -38,42 +29,19 @@ class Sensor:
             while not self.queue.empty():
                 result = self.queue.get()
         return result
-
-    def _read(self, queue, port, baudrate, timeout, stage, queue_resistance):  # communicate with arduino board
+    
+    def _read(self, queue, port, baudrate, timeout): # communicate with arduino board
         self.ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
         _sensor_bitshift = 6
         _sensor_sample_size = (32, 32)
 
+        i = 0
         while not self.exit.is_set():
             data = b''
-            # print('stage at _read does empty? :', stage.empty())
-            if not stage.empty():
-                stage_condition = stage.get()
-                if stage_condition == 'initialize':
-                    self.ser.write('i'.encode('utf-8'))
-                    print('tactile signal initializing signal sent to ESP32')
-                    time.sleep(1)
-                    continue
-                elif stage_condition == 'collect':
-                    self.ser.write('c'.encode('utf-8'))
-                    print('tactile signal mode changing signal sent to ESP32')
-                    time.sleep(1)
-                    continue
-            # print(3333, len(self.queue_resistance))
-
-            if len(self.queue_resistance) > 0:
-                resistance_value = self.queue_resistance.pop(0)
-                command_str = f'{int(resistance_value):02d}'
-                self.ser.write(f'i{command_str}'.encode('utf-8'))
-                self.ser.readline()
-                data = b''
-
             while len(data) == 0:
                 self.ser.reset_input_buffer()
                 self.ser.write('a'.encode('utf-8'))
                 data = self.ser.readline()
-
-
             # Unpack the data.
             matrix_index = data[0] - (ord('\n') + 1)
             data_matrix = data[1:-1]  # ignore the newline character at the end
@@ -83,27 +51,13 @@ class Sensor:
             data_matrix = data_matrix[0::2] * (2 ** _sensor_bitshift) + data_matrix[1::2]
             data_matrix = data_matrix.reshape(_sensor_sample_size)
 
-            for row_index in self.bad_row_indexs:
-                prev_row = data_matrix[row_index - 1, :].astype(np.float32)
-                next_row = data_matrix[row_index + 1, :].astype(np.float32)
-                data_matrix[row_index, :] = ((prev_row + next_row) / 2).astype(np.float32)
-
-            for col_index in self.bad_col_indexs:
-                prev_col = data_matrix[:, col_index - 1].astype(np.float32)
-                next_col = data_matrix[:, col_index + 1].astype(np.float32)
-                data_matrix[:, col_index] = ((prev_col + next_col) / 2).astype(np.float32)
-
-            data_matrix = np.full(data_matrix.shape, 4096) - data_matrix
-
             # append queue
             queue.put(data_matrix)
+            i += 1
 
-    def set_resistance(self, value):
-        self.queue_resistance.append(value)
 class MultiSensors:
-    def __init__(self, ports, stage):
+    def __init__(self, ports):
         self.ports = ports
-        self.stage = stage
         self.make_sensors()
 
         self.queue = Manager().Queue()
@@ -115,10 +69,9 @@ class MultiSensors:
     def make_sensors(self):
         sensors = []
         for port in self.ports:
-
-            sensors.append(Sensor(port=port, baudrate=1000000, timeout=1.0, stage=self.stage))
+            sensors.append(Sensor(port=port, baudrate=1000000, timeout=1.0))
         self.sensors = sensors
-
+    
     def init_sensors(self):
         for sensor in self.sensors:
             sensor.start()
@@ -138,14 +91,14 @@ class MultiSensors:
         self.init_values = init_values
 
         self.process.start()
-
+    
     def _read(self, queue):
         while not self.exit.is_set():
             images = []
             for sensor in self.sensors:
                 x = sensor.get()
                 images.append(x)
-            # concat
+            #concat
             if len(images) == 4:
                 '''
                 ========================================================================================================
@@ -170,20 +123,20 @@ class MultiSensors:
                 total_image = np.concatenate((a, b))
             else:
                 total_image = np.concatenate(images)
-
+            
             self.fps_monitor.tick()
             self.fps_queue.put(round(self.fps_monitor.getFps()))
             queue.put(total_image)
-
+    
     def get(self):
         result = None
         if self.queue.empty():
             result = self.queue.get()
         else:
-            while not self.queue.empty():
-                result = self.queue.get()
+           while not self.queue.empty():
+               result = self.queue.get()
         return result
-
+    
     def get_all(self):
         if self.queue.empty():
             results = [self.queue.get()]
@@ -201,48 +154,41 @@ class MultiSensors:
             while not self.fps_queue.empty():
                 result = self.fps_queue.get()
         return result
-
+    
     def close(self):
         self.exit.set()
         self.process.join()
         for sensor in self.sensors:
             sensor.close()
 
-    def set_resistance(self, value: float):
-        for sensor in self.sensors:
-            sensor.set_resistance(value)
-
-
 class SensorEnv:
-    def __init__(self, ports, stack_num, adaptive_calibration, stage, normalize=True):
+    def __init__(self, ports, stack_num, adaptive_calibration, normalize=True):
         self.stack_num = stack_num
         self.normalize = normalize
-        self.sensor = MultiSensors(ports, stage)
+        self.sensor = MultiSensors(ports)
         self.buffer = []
 
         denoise_sec = 1
         denoise_start = 2
-        self.calibration_range = (-17 * (denoise_start + denoise_sec), -17 * denoise_start)
+        self.calibration_range = (-17 * (denoise_start+denoise_sec), -17 * denoise_start)
         assert stack_num < abs(self.calibration_range[1])
         self.adaptive_calibration = adaptive_calibration
         if adaptive_calibration:
             self.calibration_step = 0
             self.buffer_len = abs(self.calibration_range[0])
         else:
-            self.calibration_step = 20
-            self.buffer_len = stack_num + 1
+            self.calibration_step = 10
+            self.buffer_len = stack_num+1
 
         self.fps = 0
         self._ready()
 
-
     def _ready(self):
         self.sensor.init_sensors()
         base_value = []
-        if self.adaptive_calibration:
+        if not self.adaptive_calibration:
             while len(base_value) < self.calibration_step:
                 base_value += self.sensor.get_all()
-
             base_value = base_value[-self.calibration_step:]
             base_value = np.array(base_value)
             self.base_value = base_value.mean(axis=0)
@@ -258,9 +204,8 @@ class SensorEnv:
             self.base_value = np.array(self.base_value)
             self.base_value = self.base_value.mean(axis=0)
 
-        images -= np.expand_dims(self.base_value, axis=0)
-        images /= 200
-
+        # images -= np.expand_dims(self.base_value, axis=0)
+        # images /= 200
         return images
 
     def get(self):
@@ -268,23 +213,8 @@ class SensorEnv:
         images = self.buffer[-self.stack_num:]
         if self.normalize:
             images = self._preprocess(images)
-
-        images = np.array(images)
-        abs_min = 0
-        abs_max = 3
-
-        images = (images - abs_min) / (abs_max - abs_min)
-        images = np.clip(images, 0, 1)
-        images = (images * 255).astype(np.uint8)
-
-
         self.fps = self.sensor.getFps()
         return images
-
-    def set_resistance(self, ratio: float):
-        assert 0.0 <= ratio <= 99.0, "resistance ratio must be between 0.0 and 99.0"
-        self.sensor.set_resistance(ratio)
-
 
     def close(self):
         self.sensor.close()

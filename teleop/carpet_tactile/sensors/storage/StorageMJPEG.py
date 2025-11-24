@@ -1,4 +1,4 @@
-import sys; sys.path.insert(0, '')
+import sys; sys.path.insert(0, '.')
 import sys, os, re, time, shutil, math, random, datetime, argparse, signal
 import numpy as np
 import multiprocessing as mp

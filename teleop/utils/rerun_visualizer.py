@@ -106,7 +106,7 @@ class RerunLogger:
                 plot_legend = rrb.PlotLegend(visible = True),
             )
             views.append(view)
-        #
+
         # image_plot_paths = [
         #                     f"{self.prefix}colors/color_0",
         #                     f"{self.prefix}colors/color_1",
@@ -125,27 +125,6 @@ class RerunLogger:
         #         ],
         #     )
         #     views.append(view)
-
-
-        # tactile_plot_paths = [
-        #                     f"{self.prefix}carpet_0",
-        # ]
-        # for plot_path in tactile_plot_paths:
-        #     view = rrb.Spatial2DView(
-        #         origin = plot_path,
-        #         time_ranges=[
-        #             rrb.2D(
-        #                 "idx",
-        #                 start = rrb.TimeRangeBoundary.cursor_relative(seq = -self.IdxRangeBoundary),
-        #                 end = rrb.TimeRangeBoundary.cursor_relative(),
-        #             )
-        #         ],
-        #     )
-        #     views.append(view)
-        views.append(rrb.Spatial2DView(
-            origin = f"{self.prefix}carpet_0",
-        ))
-
 
         grid = rrb.Grid(contents = views,
                         grid_columns=2,               
@@ -190,12 +169,16 @@ class RerunLogger:
         #         pass # Handle depth if needed
 
         # # Log tactile if needed
-        tactiles = item_data.get('tactile_vis', {}) or {}
-        for hand, tactile_vals in tactiles.items(): # [32, 32]\
-            tactile_vals = tactile_vals[0]
-            tactile_vals = cv2.applyColorMap(tactile_vals, cv2.COLORMAP_INFERNO)
-            rr.log(f"{self.prefix}{hand}/tactiles", rr.Image(tactile_vals))
+        # tactiles = item_data.get('tactiles', {}) or {}
+        # for hand, tactile_vals in tactiles.items():
+        #     if tactile_vals is not None:
+        #         pass # Handle tactile if needed
 
+        # # Log audios if needed
+        # audios = item_data.get('audios', {}) or {}
+        # for audio_key, audio_val in audios.items():
+        #     if audio_val is not None:
+        #         pass  # Handle audios if needed
 
     def log_episode_data(self, episode_data: list):
         for item_data in episode_data:
