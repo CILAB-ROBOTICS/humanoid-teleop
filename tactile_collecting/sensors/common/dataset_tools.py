@@ -1,4 +1,4 @@
-import sys; sys.path.insert(0, '.')
+import sys; sys.path.insert(0, '')
 
 import numpy as np
 import sys, os, re, math, shutil, time, datetime
