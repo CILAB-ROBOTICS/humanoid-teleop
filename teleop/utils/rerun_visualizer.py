@@ -2,9 +2,14 @@ import os
 import json
 import cv2
 import time
+import os
+import json
+
+import cv2
 import rerun as rr
 import rerun.blueprint as rrb
 from datetime import datetime
+
 os.environ["RUST_LOG"] = "error"
 
 class RerunEpisodeReader:
