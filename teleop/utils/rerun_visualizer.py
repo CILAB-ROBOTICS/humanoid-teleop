@@ -4,6 +4,7 @@ import cv2
 import time
 import rerun as rr
 import rerun.blueprint as rrb
+import numpy as np
 from datetime import datetime
 os.environ["RUST_LOG"] = "error"
 
@@ -125,6 +126,24 @@ class RerunLogger:
         #         ],
         #     )
         #     views.append(view)
+        image_plot_paths = [
+                            f"{self.prefix}colors/color_wrist_left",
+                            f"{self.prefix}colors/color_wrist_right",
+                            f"{self.prefix}colors/color_front_rgb",
+                            f"{self.prefix}depths/depth_front",
+        ]
+        for plot_path in image_plot_paths:
+            view = rrb.Spatial2DView(
+                origin = plot_path,
+                time_ranges=[
+                    rrb.VisibleTimeRange(
+                        "idx",
+                        start = rrb.TimeRangeBoundary.cursor_relative(seq = -self.IdxRangeBoundary),
+                        end = rrb.TimeRangeBoundary.cursor_relative(),
+                    )
+                ],
+            )
+            views.append(view)
 
         grid = rrb.Grid(contents = views,
                         grid_columns=2,               
@@ -138,6 +157,11 @@ class RerunLogger:
 
     def log_item_data(self, item_data: dict):
         rr.set_time_sequence("idx", item_data.get('idx', 0))
+
+        def _to_rgb(image: np.ndarray):
+            if image.ndim == 3 and image.shape[2] == 3:
+                return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            return image
 
         # Log states
         states = item_data.get('states', {}) or {}
@@ -168,6 +192,18 @@ class RerunLogger:
         #         # rr.log(f"{self.prefix}depths/{depth_key}", rr.Image(depth_val))
         #         pass # Handle depth if needed
 
+        # Log colors (images)
+        colors = item_data.get('colors', {}) or {}
+        for color_key, color_val in colors.items():
+            if color_val is not None:
+                rr.log(f"{self.prefix}colors/{color_key}", rr.Image(_to_rgb(color_val)))
+
+        # Log depths (images)
+        depths = item_data.get('depths', {}) or {}
+        for depth_key, depth_val in depths.items():
+            if depth_val is not None:
+                rr.log(f"{self.prefix}depths/{depth_key}", rr.DepthImage(depth_val))
+                
         # # Log tactile if needed
         # tactiles = item_data.get('tactiles', {}) or {}
         # for hand, tactile_vals in tactiles.items():

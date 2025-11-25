@@ -25,6 +25,7 @@ from teleop.robot_control.robot_arm import G1_29_ArmController, G1_23_ArmControl
 # from teleop.robot_control.robot_hand_brainco import Brainco_Controller
 from teleop.image_server.image_client import ImageClient
 from teleop.utils.episode_writer import EpisodeWriter
+from teleop.utils.realsense_stream import RealSenseManager
 from sshkeyboard import listen_keyboard, stop_listening
 
 # for simulation
@@ -78,7 +79,14 @@ if __name__ == '__main__':
     parser.add_argument('--carpet_sensitivity', type=int, default=250, help='Set carpet tactile sensor sensitivity (default: 1.0)')
     parser.add_argument('--carpet_headless', action='store_true', help='Enable headless mode for carpet tactile sensor data collection')
     parser.add_argument('--carpet_tty', type=str, default='/dev/tty.usbserial-02857AC6', help='Set the TTY port for carpet tactile sensors (default: /dev/tty.usbserial-02857AC6)')
-
+    parser.add_argument('--enable-realsense-captures', action='store_true',
+                        help='Enable additional RealSense capture (wrist left/right RGB, front RGBD)')
+    parser.add_argument('--wrist-realsense-serials', nargs=2, default=(239222303564, 244422300653),metavar=('LEFT', 'RIGHT'),
+                        help='Serial numbers for left and right wrist RealSense cameras')
+    parser.add_argument('--front-realsense-serial', type=str, default=239222302557,help='Serial number for the front RealSense camera (RGBD)')
+    parser.add_argument('--realsense-resolution', nargs=2, type=int, default=[480, 640], metavar=('H', 'W'),
+                        help='RealSense capture resolution (height width)')
+    parser.add_argument('--realsense-fps', type=int, default=30, help='RealSense capture FPS')
 
     args = parser.parse_args()
     logger_mp.info(f"args: {args}")
@@ -135,7 +143,20 @@ if __name__ == '__main__':
         WRIST = True
     else:
         WRIST = False
-    
+    realsense_manager = None
+    if args.enable_realsense_captures:
+        wrist_serials = tuple(args.wrist_realsense_serials) if args.wrist_realsense_serials else None
+        front_serial = args.front_realsense_serial
+        if wrist_serials or front_serial:
+            realsense_manager = RealSenseManager(
+                wrist_serials=wrist_serials,
+                front_serial=front_serial,
+                resolution=tuple(args.realsense_resolution),
+                fps=args.realsense_fps,
+            )
+            realsense_manager.start()
+        else:
+            logger_mp.warning("RealSense capture enabled but no serials provided.")
     if BINOCULAR and not (img_config['head_camera_image_shape'][1] / img_config['head_camera_image_shape'][0] > ASPECT_RATIO_THRESHOLD):
         tv_img_shape = (img_config['head_camera_image_shape'][0], img_config['head_camera_image_shape'][1] * 2, 3)
     else:
@@ -243,9 +264,16 @@ if __name__ == '__main__':
         while running:
             start_time = time.time()
 
+            realsense_frames = realsense_manager.get_frames() if realsense_manager else {}
+
             if not args.headless:
                 tv_resized_image = cv2.resize(tv_img_array, (tv_img_shape[1] // 2, tv_img_shape[0] // 2))
                 cv2.imshow("record image", tv_resized_image)
+                for name, frames in realsense_frames.items():
+                    color_img = frames.get("color")
+                    if color_img is not None and color_img.size > 0:
+                        preview = cv2.resize(color_img, (color_img.shape[1] // 2, color_img.shape[0] // 2))
+                        cv2.imshow(f"realsense_{name}", preview)
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     running = False
@@ -364,6 +392,9 @@ if __name__ == '__main__':
                 # wrist image
                 if WRIST:
                     current_wrist_image = wrist_img_array.copy()
+                rs_wrist_left = realsense_frames.get("wrist_left", {}) if realsense_frames else {}
+                rs_wrist_right = realsense_frames.get("wrist_right", {}) if realsense_frames else {}
+                rs_front = realsense_frames.get("front", {}) if realsense_frames else {}
                 # arm state and action
                 # left_arm_state  = current_lr_arm_q[:7]
                 # right_arm_state = current_lr_arm_q[-7:]
@@ -384,6 +415,14 @@ if __name__ == '__main__':
                         if WRIST:
                             colors[f"color_{1}"] = current_wrist_image[:, :wrist_img_shape[1]//2]
                             colors[f"color_{2}"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                    if rs_wrist_left.get("color") is not None:
+                        colors["color_wrist_left"] = rs_wrist_left["color"]
+                    if rs_wrist_right.get("color") is not None:
+                        colors["color_wrist_right"] = rs_wrist_right["color"]
+                    if rs_front.get("color") is not None:
+                        colors["color_front_rgb"] = rs_front["color"]
+                    if rs_front.get("depth") is not None:
+                        depths["depth_front"] = rs_front["depth"]
                     states = {
                         "left_arm": {                                                                    
                             # "qpos":   left_arm_state.tolist(),    # numpy.array -> list
@@ -478,6 +517,8 @@ if __name__ == '__main__':
         if WRIST:
             wrist_img_shm.close()
             wrist_img_shm.unlink()
+        if realsense_manager:
+            realsense_manager.stop()
         if args.record:
             recorder.close()
         listen_keyboard_thread.join()
