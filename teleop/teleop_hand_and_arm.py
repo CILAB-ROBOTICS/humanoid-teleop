@@ -88,7 +88,7 @@ def publish_reset_category(category: int, publisher):  # Scene Reset signal
 num_tactile_per_hand = 1062 # add
 
 # state transition
-start_signal = False
+start_signal = True
 running = True
 should_toggle_recording = False
 is_recording = False
@@ -106,6 +106,13 @@ def on_press(key):
         should_toggle_recording = True
     else:
         logger_mp.info(f"{key} was pressed, but no action is defined for this key.")
+
+
+listen_keyboard_thread = threading.Thread(target=listen_keyboard,
+                                          kwargs={"on_press": on_press, "until": None, "sequential": False, },
+                                          daemon=True)
+listen_keyboard_thread.start()
+
 
 
 class Dummy_ArmController:
